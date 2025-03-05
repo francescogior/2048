@@ -144,10 +144,11 @@
         display: flex;
         justify-content: center;
         align-items: center;
-        transition: transform 0.15s ease, top 0.15s ease, left 0.15s ease;
+        transition: transform 0.15s ease, top 0.2s ease, left 0.2s ease;
         animation: tile-appear 0.2s ease 0.1s;
         animation-fill-mode: backwards;
         transform: scale(1);
+        z-index: 10;
       }
 
       @keyframes tile-appear {
@@ -163,7 +164,7 @@
 
       .tile.tile-merged {
         z-index: 20;
-        animation: tile-merge 0.2s ease 0.1s;
+        animation: tile-merge 0.3s ease;
         animation-fill-mode: backwards;
       }
 
@@ -171,7 +172,7 @@
         0% {
           transform: scale(0.8);
         }
-        80% {
+        50% {
           transform: scale(1.2);
         }
         100% {
@@ -180,7 +181,7 @@
       }
 
       .tile.tile-new {
-        animation: tile-appear 0.2s ease;
+        animation: tile-appear 0.3s ease;
       }
 
       .tile-2 {
@@ -414,12 +415,14 @@
         // Game variables
         const gridSize = 4;
         let grid = [];
+        let previousGrid = [];
         let score = 0;
         let bestScore = localStorage.getItem('bestScore') || 0;
         let gameOver = false;
         let waitingForAnimation = false;
         let tileSize = 0;
         let cellGap = 15;
+        let mergedTiles = [];
 
         // DOM elements
         const gridContainer = document.getElementById('grid-container');
@@ -466,6 +469,7 @@
           score = 0;
           gameOver = false;
           waitingForAnimation = false;
+          mergedTiles = [];
 
           // Update DOM
           updateScore(0);
@@ -677,8 +681,11 @@
         function moveTiles(direction) {
           if (gameOver || waitingForAnimation) return false;
 
+          // Save previous grid state for animation
+          previousGrid = JSON.parse(JSON.stringify(grid));
+          mergedTiles = [];
+
           let moved = false;
-          const oldGrid = JSON.parse(JSON.stringify(grid));
           let scoreAddition = 0;
 
           // Process the grid based on direction
@@ -702,7 +709,7 @@
             waitingForAnimation = true;
 
             // Update the grid with animations
-            updateGrid();
+            updateGridWithAnimation();
 
             // Update score with animation
             updateScore(scoreAddition);
@@ -717,10 +724,116 @@
                 gameOver = true;
                 showGameOver();
               }
-            }, 150);
+            }, 250); // Increased delay to match animation duration
           }
 
           return moved;
+        }
+
+        // Update grid with movement animation
+        function updateGridWithAnimation() {
+          // Clear tile container
+          tileContainer.innerHTML = '';
+
+          // First, create tiles for the current grid state
+          for (let i = 0; i < gridSize; i++) {
+            for (let j = 0; j < gridSize; j++) {
+              if (grid[i][j] !== 0) {
+                const value = grid[i][j];
+                const isMerged = mergedTiles.some(
+                  tile => tile.row === i && tile.col === j,
+                );
+
+                // Find previous position of this tile
+                let fromRow = i;
+                let fromCol = j;
+                let found = false;
+
+                // If this is a merged tile, we need to find both original tiles
+                if (isMerged) {
+                  // For merged tiles, we'll create them at their final position
+                  createTileElement(i, j, value, false, true);
+                } else {
+                  // For non-merged tiles, look for their previous position
+                  // Search in previous grid for this value
+                  outerLoop: for (let r = 0; r < gridSize; r++) {
+                    for (let c = 0; c < gridSize; c++) {
+                      if (previousGrid[r][c] === value) {
+                        // Check if this position is now empty or has a different value
+                        if (grid[r][c] !== value) {
+                          fromRow = r;
+                          fromCol = c;
+                          found = true;
+                          break outerLoop;
+                        }
+                      }
+                    }
+                  }
+
+                  if (found) {
+                    // Create tile with animation from previous position
+                    createTileWithAnimation(fromRow, fromCol, i, j, value);
+                  } else {
+                    // If not found, it's a new tile or we couldn't track it
+                    createTileElement(i, j, value, false, false);
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Create a tile with movement animation
+        function createTileWithAnimation(
+          fromRow,
+          fromCol,
+          toRow,
+          toCol,
+          value,
+        ) {
+          const tile = document.createElement('div');
+          const tileClass = `tile tile-${value}`;
+          tile.className = tileClass;
+          tile.textContent = value;
+          tile.setAttribute('data-value', value);
+          tile.setAttribute('data-row', toRow);
+          tile.setAttribute('data-col', toCol);
+
+          // Set the tile size
+          tile.style.width = `${tileSize}px`;
+          tile.style.height = `${tileSize}px`;
+
+          // Start position (from)
+          const fromTop = fromRow * (tileSize + cellGap);
+          const fromLeft = fromCol * (tileSize + cellGap);
+
+          // End position (to)
+          const toTop = toRow * (tileSize + cellGap);
+          const toLeft = toCol * (tileSize + cellGap);
+
+          // Set initial position
+          tile.style.top = `${fromTop}px`;
+          tile.style.left = `${fromLeft}px`;
+
+          // Adjust font size based on number length
+          if (value.toString().length <= 2) {
+            tile.style.fontSize = `${tileSize * 0.5}px`;
+          } else if (value.toString().length === 3) {
+            tile.style.fontSize = `${tileSize * 0.4}px`;
+          } else {
+            tile.style.fontSize = `${tileSize * 0.3}px`;
+          }
+
+          tileContainer.appendChild(tile);
+
+          // Force reflow to ensure the animation works
+          void tile.offsetWidth;
+
+          // Set the final position to trigger the transition
+          tile.style.top = `${toTop}px`;
+          tile.style.left = `${toLeft}px`;
+
+          return tile;
         }
 
         // Move tiles up
@@ -753,6 +866,8 @@
                     scoreAddition += grid[row - 1][j];
                     score += grid[row - 1][j];
                     lastMergedRow = row - 1;
+                    // Track merged tile
+                    mergedTiles.push({ row: row - 1, col: j });
                     moved = true;
                     break;
                   }
@@ -798,6 +913,8 @@
                     scoreAddition += grid[i][col + 1];
                     score += grid[i][col + 1];
                     lastMergedCol = col + 1;
+                    // Track merged tile
+                    mergedTiles.push({ row: i, col: col + 1 });
                     moved = true;
                     break;
                   }
@@ -843,6 +960,8 @@
                     scoreAddition += grid[row + 1][j];
                     score += grid[row + 1][j];
                     lastMergedRow = row + 1;
+                    // Track merged tile
+                    mergedTiles.push({ row: row + 1, col: j });
                     moved = true;
                     break;
                   }
@@ -888,6 +1007,8 @@
                     scoreAddition += grid[i][col - 1];
                     score += grid[i][col - 1];
                     lastMergedCol = col - 1;
+                    // Track merged tile
+                    mergedTiles.push({ row: i, col: col - 1 });
                     moved = true;
                     break;
                   }
